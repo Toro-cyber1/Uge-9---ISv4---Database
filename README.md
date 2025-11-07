@@ -1,4 +1,4 @@
-## App der viser et simpelt lager/ordre-system og styrer en UR-robot.
+## App der viser et simpelt lager/ordre-system og styrer en UR-robot og og gemmer data i en SQLite-database.
 - Start URSim + app.
 
 - Vis 2 ordrer i Queued Orders.
