@@ -1,14 +1,19 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using InventorySystem.Data;
+using InventorySystem;
+using Microsoft.EntityFrameworkCore;
 
 namespace InventorySystem;
 
 public partial class MainWindow : Window
 {
+    private readonly InventoryDbContext _db = new();   
     private readonly OrderBook _orderBook = new();
     private readonly ItemSorterRobot _robot = new();
     
@@ -25,49 +30,40 @@ public partial class MainWindow : Window
                 StatusMessages.Text += msg + Environment.NewLine);
 
         _robot.IpAddress = IpBox.Text ?? "127.0.0.1";
-        _robot.DryRun = UseDryRun.IsChecked ?? true;
+        _robot.DryRun    = UseDryRun.IsChecked ?? true;
 
-        var item1 = new UnitItem
-        {
-            Name = "M3 screw",
-            PricePerUnit = 1m,
-            InventoryLocation = 1
-        };
-        var item2 = new UnitItem
-        {
-            Name = "M3 nut",
-            PricePerUnit = 1.5m,
-            InventoryLocation = 2
-        };
-        var item3 = new UnitItem
-        {
-            Name = "pen",
-            PricePerUnit = 1m,
-            InventoryLocation = 3
-        };
+        DbInitializer.Initialize(_db);
 
-        var orderLine1 = new OrderLine { Item = item1, Quantity = 1 };
-        var orderLine2 = new OrderLine { Item = item2, Quantity = 2 };
-        var orderLine3 = new OrderLine { Item = item3, Quantity = 1 };
-
-        var order1 = new Order
-        {
-            OrderLines = new() { orderLine1, orderLine2, orderLine3 },
-            Time = DateTime.Now - TimeSpan.FromDays(2)
-        };
-        var order2 = new Order
-        {
-            OrderLines = new() { orderLine2 },
-            Time = DateTime.Now
-        };
-
-        var customer1 = new Customer { Name = "Ramanda" };
-        var customer2 = new Customer { Name = "Totoro" };
-
-        customer1.CreateOrder(_orderBook, order1);
-        customer2.CreateOrder(_orderBook, order2);
+        LoadOrdersFromDatabase();
 
         UpdateTotals();
+    }
+    
+    private void LoadOrdersFromDatabase()
+    {
+        var queuedOrders = _db.Orders
+            .Include(o => o.OrderLines)
+                .ThenInclude(ol => ol.Item)
+            .Where(o => !o.IsProcessed)
+            .OrderBy(o => o.Time)
+            .ToList();
+
+        var processedOrders = _db.Orders
+            .Include(o => o.OrderLines)
+                .ThenInclude(ol => ol.Item)
+            .Where(o => o.IsProcessed)
+            .OrderBy(o => o.Time)
+            .ToList();
+
+        _orderBook.Queued.Clear();
+        _orderBook.Processed.Clear();
+
+        foreach (var o in queuedOrders)
+            _orderBook.Queued.Add(o);
+
+        foreach (var o in processedOrders)
+            _orderBook.Processed.Add(o);
+
     }
 
     private async void OnProcessClick(object? sender, RoutedEventArgs e)
@@ -82,6 +78,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var processedOrder = _orderBook.LastProcessedOrder;   // forudsætter LastProcessedOrder i OrderBook
+        if (processedOrder != null)
+        {
+            processedOrder.IsProcessed = true;
+            _db.Orders.Update(processedOrder);
+            _db.SaveChanges();
+        }
+        
         foreach (var line in lines)
         {
             for (int i = 0; i < line.Quantity; i++)
@@ -107,9 +111,10 @@ public partial class MainWindow : Window
     private void OnApplyRobotSettingsClick(object? sender, RoutedEventArgs e)
     {
         _robot.IpAddress = IpBox.Text ?? "127.0.0.1";
-        _robot.DryRun = UseDryRun.IsChecked ?? true;
+        _robot.DryRun    = UseDryRun.IsChecked ?? true;
 
         StatusMessages.Text +=
             $"Robot settings updated: IP={_robot.IpAddress}, DryRun={_robot.DryRun}{Environment.NewLine}";
     }
 }
+
